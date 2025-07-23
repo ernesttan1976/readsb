@@ -113,7 +113,7 @@ void icaoFilterExpire() {
 void icaoFilterAdd(uint32_t addr) {
     uint32_t h, h0;
     h0 = h = filterHash(addr);
-    int attempts = 0;
+    uint32_t attempts = 0;  // Changed from int to uint32_t
     while (icao_filter_active[h] != EMPTY && icao_filter_active[h] != addr) {
         h = (h + 1) & (filterBuckets - 1);
         attempts++;
@@ -129,6 +129,9 @@ void icaoFilterAdd(uint32_t addr) {
                 // If we can't resize anymore, just drop the oldest entry
                 // Find a random slot to overwrite (simple eviction strategy)
                 h = (addr ^ (addr >> 16)) & (filterBuckets - 1);
+                if (icao_filter_active[h] == EMPTY) {
+                    occupied++;
+                }
                 icao_filter_active[h] = addr;
                 return;
             }
