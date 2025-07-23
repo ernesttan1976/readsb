@@ -45,7 +45,7 @@ static inline uint32_t filterHash(uint32_t addr) {
 #define MAXBITS 20
 
 void icaoFilterInit() {
-    filterBits = MINBITS;
+    filterBits = MINBITS + 2; // Start with a larger filter (was MINBITS)
     filterBuckets = 1ULL << filterBits;
     filterSize = filterBuckets * sizeof(uint32_t);
     occupied = 0;
@@ -57,6 +57,7 @@ void icaoFilterInit() {
     memset(icao_filter_b, 0xFF, filterSize);
     icao_filter_active = icao_filter_a;
 }
+
 void icaoFilterDestroy() {
     sfree(icao_filter_a);
     sfree(icao_filter_b);
@@ -112,10 +113,28 @@ void icaoFilterExpire() {
 void icaoFilterAdd(uint32_t addr) {
     uint32_t h, h0;
     h0 = h = filterHash(addr);
+    int attempts = 0;
     while (icao_filter_active[h] != EMPTY && icao_filter_active[h] != addr) {
         h = (h + 1) & (filterBuckets - 1);
+        attempts++;
         if (h == h0) {
-            fprintf(stderr, "ICAO hash table full, this shouldn't happen\n");
+            // Hash table is full, try to resize it or handle gracefully
+            if (filterBits < MAXBITS) {
+                // Try to resize the filter to a larger size
+                icaoFilterResize(filterBits + 1);
+                // Retry the add operation after resize
+                icaoFilterAdd(addr);
+                return;
+            } else {
+                // If we can't resize anymore, just drop the oldest entry
+                // Find a random slot to overwrite (simple eviction strategy)
+                h = (addr ^ (addr >> 16)) & (filterBuckets - 1);
+                icao_filter_active[h] = addr;
+                return;
+            }
+        }
+        // Prevent infinite loops in case of issues
+        if (attempts > filterBuckets) {
             return;
         }
     }
@@ -124,7 +143,8 @@ void icaoFilterAdd(uint32_t addr) {
         icao_filter_active[h] = addr;
     }
 
-    if (occupied > filterBuckets / 3 && filterBits < 20) {
+    // Increase resize threshold to be more aggressive about growing
+    if (occupied > filterBuckets / 2 && filterBits < MAXBITS) {
         icaoFilterResize(filterBits + 1);
     }
 }
